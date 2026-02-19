@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SIEM Dashboard</title>
+    <link rel="stylesheet" href="/static/css/dashboard.css">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.2/socket.io.min.js"></script>
+</head>
+<body>
+    <nav class="topbar">
+        <div class="topbar-left">
+            <span class="logo">◉ SIEM</span>
+            <span class="logo-sub">Security Operations Dashboard</span>
+        </div>
+        <div class="topbar-center">
+            <div class="filter-bar">
+                <div class="filter-group">
+                    <label>Time Range</label>
+                    <select id="time-range">
+                        <option value="15m">Last 15 min</option>
+                        <option value="1h" selected>Last 1 hour</option>
+                        <option value="6h">Last 6 hours</option>
+                        <option value="24h">Last 24 hours</option>
+                        <option value="custom">Custom</option>
+                    </select>
+                </div>
+                <div class="filter-group custom-range" id="custom-range" style="display:none">
+                    <label>From</label>
+                    <input type="datetime-local" id="range-from">
+                    <label>To</label>
+                    <input type="datetime-local" id="range-to">
+                </div>
+                <div class="filter-group">
+                    <label>Severity</label>
+                    <select id="filter-severity">
+                        <option value="">All</option>
+                        <option value="critical">Critical</option>
+                        <option value="high">High</option>
+                        <option value="medium">Medium</option>
+                        <option value="low">Low</option>
+                    </select>
+                </div>
+                <div class="filter-group">
+                    <label>Event Type</label>
+                    <select id="filter-type">
+                        <option value="">All</option>
+                        <option value="auth_failure">Auth Failure</option>
+                        <option value="auth_success">Auth Success</option>
+                        <option value="firewall_drop">Firewall Drop</option>
+                        <option value="firewall_reject">Firewall Reject</option>
+                        <option value="port_scan">Port Scan</option>
+                        <option value="malware_signature">Malware</option>
+                        <option value="privilege_escalation">Priv Escalation</option>
+                        <option value="data_exfiltration">Data Exfil</option>
+                        <option value="config_change">Config Change</option>
+                        <option value="dns_query">DNS Query</option>
+                    </select>
+                </div>
+                <div class="filter-group">
+                    <label>Source IP</label>
+                    <input type="text" id="filter-ip" placeholder="e.g. 185.220.101.34" spellcheck="false">
+                </div>
+                <button class="btn-filter" onclick="fetchAll()">Apply</button>
+            </div>
+        </div>
+        <div class="topbar-right">
+            <span class="pulse-dot"></span>
+            <span id="conn-status">LIVE</span>
+            <span class="sep">|</span>
+            <span id="clock"></span>
+        </div>
+    </nav>
+
+    <div class="stat-row">
+        <div class="stat-card">
+            <div class="stat-label">Total Events</div>
+            <div class="stat-value" id="stat-total">0</div>
+        </div>
+        <div class="stat-card stat-alert">
+            <div class="stat-label">Critical</div>
+            <div class="stat-value" id="stat-critical">0</div>
+        </div>
+        <div class="stat-card stat-warn">
+            <div class="stat-label">High Severity</div>
+            <div class="stat-value" id="stat-high">0</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">Unique Sources</div>
+            <div class="stat-value" id="stat-sources">0</div>
+        </div>
+        <div class="stat-card stat-alert">
+            <div class="stat-label">Active Alerts</div>
+            <div class="stat-value" id="stat-alerts">0</div>
+        </div>
+        <div class="stat-card stat-warn">
+            <div class="stat-label">Failed Logins</div>
+            <div class="stat-value" id="stat-logins">0</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">Threat Intel Hits</div>
+            <div class="stat-value" id="stat-intel">0</div>
+        </div>
+    </div>
+
+    <div class="grid-2col">
+        <div class="panel">
+            <div class="panel-head">Event Timeline</div>
+            <canvas id="timelineChart"></canvas>
+        </div>
+        <div class="panel">
+            <div class="panel-head">Severity Breakdown</div>
+            <canvas id="severityChart"></canvas>
+        </div>
+    </div>
+
+    <div class="grid-2col">
+        <div class="panel">
+            <div class="panel-head">Geographic Threat Map</div>
+            <div id="geomap"></div>
+        </div>
+        <div class="panel">
+            <div class="panel-head">Event Types</div>
+            <canvas id="eventTypeChart"></canvas>
+        </div>
+    </div>
+
+    <div class="grid-2col">
+        <div class="panel">
+            <div class="panel-head">Protocol Distribution</div>
+            <canvas id="protoChart"></canvas>
+        </div>
+        <div class="panel">
+            <div class="panel-head">Top Targeted Ports</div>
+            <canvas id="portChart"></canvas>
+        </div>
+    </div>
+
+    <div class="grid-2col">
+        <div class="panel">
+            <div class="panel-head">MITRE ATT&CK Coverage</div>
+            <div id="mitre-grid" class="mitre-grid"></div>
+        </div>
+        <div class="panel">
+            <div class="panel-head">Threat Intelligence Matches</div>
+            <div id="intel-table-wrap" class="table-wrap">
+                <table id="intel-table">
+                    <thead><tr><th>IP</th><th>Type</th><th>Hits</th><th>Last Seen</th></tr></thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <div class="grid-2col">
+        <div class="panel">
+            <div class="panel-head">Top Source IPs</div>
+            <div class="table-wrap">
+                <table id="sources-table">
+                    <thead><tr><th>IP</th><th>Country</th><th>City</th><th>Events</th><th>High/Crit</th></tr></thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+        </div>
+        <div class="panel">
+            <div class="panel-head">Failed Login Attempts</div>
+            <div class="table-wrap">
+                <table id="logins-table">
+                    <thead><tr><th>Source IP</th><th>Username</th><th>Attempts</th><th>Location</th></tr></thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <div class="panel full-width">
+        <div class="panel-head">
+            Active Alerts
+            <span class="alert-count-badge" id="alert-badge">0</span>
+        </div>
+        <div class="table-wrap">
+            <table id="alerts-table">
+                <thead>
+                    <tr>
+                        <th>Time</th><th>Type</th><th>Severity</th><th>Source</th>
+                        <th>Description</th><th>MITRE</th><th>Count</th><th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+        </div>
+    </div>
+
+    <div class="panel full-width">
+        <div class="panel-head">Live Event Feed</div>
+        <div id="event-feed" class="event-feed"></div>
+    </div>
+
+    <script>
+        const API_TOKEN = "{{ api_token }}";
+    </script>
+    <script src="/static/js/dashboard.js"></script>
+</body>
+</html>
