@@ -143,7 +143,7 @@ siem-dashboard/
     └── test_correlation.py # 20 unit tests
 ```
 
-note: AI help with organization and clarity for speeding some things in README up.
+# note: AI help with organization and clarity for speeding some things in README up.
 
 ## Tech Stack
 
